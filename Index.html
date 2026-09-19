@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>かんたんMP3</title>
+<style>
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:#f4f7fb;
+  margin:0;
+  color:#18202a;
+}
+main{
+  max-width:650px;
+  margin:auto;
+  padding:25px 16px;
+}
+.card{
+  background:white;
+  padding:25px;
+  border-radius:20px;
+  box-shadow:0 5px 25px #00000015;
+}
+h1{font-size:30px;margin:0 0 8px}
+p{line-height:1.6}
+.step{
+  font-size:19px;
+  font-weight:bold;
+  margin-top:25px;
+  margin-bottom:8px;
+}
+input,select,button{
+  width:100%;
+  box-sizing:border-box;
+  padding:14px;
+  font-size:17px;
+  border-radius:10px;
+  border:1px solid #ccc;
+}
+button{
+  margin-top:20px;
+  background:#1769e0;
+  color:white;
+  border:0;
+  font-weight:bold;
+}
+button:disabled{opacity:.5}
+#status{margin-top:20px}
+.item{
+  border-top:1px solid #eee;
+  padding:12px 0;
+}
+.save{
+  display:inline-block;
+  margin-top:8px;
+  padding:10px 15px;
+  background:#16803c;
+  color:white;
+  border-radius:8px;
+  text-decoration:none;
+}
+.note{
+  margin-top:25px;
+  background:#f3f4f6;
+  padding:13px;
+  border-radius:10px;
+  font-size:13px;
+}
+</style>
+</head>
+
+<body>
+<main>
+<div class="card">
+
+<h1>🎵 かんたんMP3</h1>
+
+<p>
+音楽ファイルを選ぶだけでMP3に変換できます。<br>
+音楽データは外部へ送信されません。
+</p>
+
+<div class="step">① 音楽を選ぶ</div>
+<input id="files"
+       type="file"
+       accept="audio/*,.m4a,.aac,.wav"
+       multiple>
+
+<div class="step">② 音質を選ぶ</div>
+
+<select id="rate">
+<option value="128">標準（128kbps）</option>
+<option value="192" selected>おすすめ（192kbps）</option>
+<option value="256">高音質（256kbps）</option>
+<option value="320">最高音質（320kbps）</option>
+</select>
+
+<button id="go">③ MP3に変換</button>
+
+<div id="status"></div>
+
+<div class="note">
+※ ブラウザによって読み込める音楽形式が異なります。<br>
+※ iPhoneの「ミュージック」アプリ内の曲をWebサイトから直接選択することはできません。<br>
+※ 著作権保護された音源の保護解除には対応していません。
+</div>
+
+</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.min.js"></script>
+
+<script>
+const files=document.getElementById("files");
+const button=document.getElementById("go");
+const status=document.getElementById("status");
+const rate=document.getElementById("rate");
+
+function to16(floatArray){
+  const out=new Int16Array(floatArray.length);
+
+  for(let i=0;i<floatArray.length;i++){
+    let s=Math.max(-1,Math.min(1,floatArray[i]));
+    out[i]=s<0?s*32768:s*32767;
+  }
+
+  return out;
+}
+
+async function convert(file,kbps){
+
+  const AudioContext=
+    window.AudioContext||
+    window.webkitAudioContext;
+
+  const ctx=new AudioContext();
+
+  const data=await file.arrayBuffer();
+
+  const buffer=
+    await ctx.decodeAudioData(data.slice(0));
+
+  await ctx.close();
+
+  const channels=
+    Math.min(2,buffer.numberOfChannels);
+
+  const sampleRate=
+    buffer.sampleRate;
+
+  const encoder=
+    new lamejs.Mp3Encoder(
+      channels,
+      sampleRate,
+      kbps
+    );
+
+  const left=
+    to16(buffer.getChannelData(0));
+
+  const right=
+    channels===2
+      ?to16(buffer.getChannelData(1))
+      :null;
+
+  const block=1152;
+  const output=[];
+
+  for(let i=0;i<left.length;i+=block){
+
+    let mp3;
+
+    if(channels===2){
+
+      mp3=encoder.encodeBuffer(
+        left.subarray(i,i+block),
+        right.subarray(i,i+block)
+      );
+
+    }else{
+
+      mp3=encoder.encodeBuffer(
+        left.subarray(i,i+block)
+      );
+
+    }
+
+    if(mp3.length){
+      output.push(mp3);
+    }
+  }
+
+  const end=encoder.flush();
+
+  if(end.length){
+    output.push(end);
+  }
+
+  return new Blob(
+    output,
+    {type:"audio/mpeg"}
+  );
+}
+
+button.onclick=async()=>{
+
+  const selected=[...files.files];
+
+  if(!selected.length){
+    status.textContent=
+      "音楽ファイルを選んでください。";
+    return;
+  }
+
+  button.disabled=true;
+  status.innerHTML="";
+
+  for(const file of selected){
+
+    const row=
+      document.createElement("div");
+
+    row.className="item";
+
+    row.textContent=
+      "変換中… "+file.name;
+
+    status.appendChild(row);
+
+    try{
+
+      const mp3=
+        await convert(
+          file,
+          Number(rate.value)
+        );
+
+      const link=
+        document.createElement("a");
+
+      link.className="save";
+
+      link.href=
+        URL.createObjectURL(mp3);
+
+      link.download=
+        file.name.replace(
+          /\.[^.]+$/,
+          ""
+        )+".mp3";
+
+      link.textContent=
+        "MP3を保存";
+
+      row.textContent=
+        "✓ "+file.name;
+
+      row.appendChild(
+        document.createElement("br")
+      );
+
+      row.appendChild(link);
+
+    }catch(e){
+
+      row.textContent=
+        "変換できませんでした："+
+        file.name+
+        "（この形式をブラウザが読み込めない可能性があります）";
+    }
+  }
+
+  button.disabled=false;
+};
+</script>
+
+</body>
+</html>
